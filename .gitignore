@@ -1,0 +1,7 @@
+.DS_Store
+.RHistory
+*.pyc
+*.pdf
+source_models/
+presentation/
+
