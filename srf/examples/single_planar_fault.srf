@@ -1,0 +1,43 @@
+2.0
+#
+# Example 2a: Single planar fault.
+#
+# Following these comment lines, a description of the fault plane location and
+# geometry is given by 3 lines starting with "PLANE 1".  Note that this description
+# of the fault plane is optional. However, this information is useful in that it
+# provides a concise description of the fault (e.g. for plotting purposes, etc.).
+#
+# The kinematic rupture information begins with the line "POINTS 4", which means this
+# rupture is represented by 4 subfaults. The detailed description of the rupture on
+# each subfault follows this line. Note that each subfault has a single slip-rate
+# function with the direction of slip (rake) varying from subfault to subfault.
+#
+# Other useful information that might be included in these comment lines is documentation
+# ofthe source of the rupture e.g.,
+#
+#      "Example 2a is a sample rupture scenario generated Mon Nov 24 11:50:22 PST 2014
+#       with the code "genslip-v3.3.2" (Robert Graves, <rwgraves@usgs.gov>)."
+#
+# or the usable bandwidth of the rupture, e.g.,
+#
+#   "This rupture is applicable in the bandwidth T>3 sec."
+#
+PLANE 1
+-119.0985   35.0140     2     2    16.00    12.00
+95   40     3.00    -2.00    10.00
+POINTS 4
+-119.1459  34.9826  4.9284  95  40  4.80000e+11  2.6465  1.00000e-01  3.20000e+05 2.65000e+00
+82     8.59      6     0.00      0     0.00      0
+0.00000e+00  5.91682e+01  1.16849e+01  8.57081e+00  4.81257e+00  1.63265e+00
+-119.0585  34.9763  4.9284  95  40  4.80000e+11  2.4801  1.00000e-01  3.20000e+05 2.65000e+00
+120    43.18  7     0.00      0     0.00      0
+0.00000e+00  2.88510e+02  5.43680e+01  4.31742e+01  2.83736e+01  1.38752e+01
+3.50832e+00
+-119.1503  34.9414  8.7851  95  40  4.80000e+11  0.0000  1.00000e-01  3.60000e+05 2.75000e+00
+76    26.61      2     0.00  0   0.00      0
+0.00000e+00  2.66114e+02
+-119.0629  34.9352  8.7851  95 40  4.80000e+11  0.1637  1.00000e-01  3.60000e+05 2.75000e+00
+82   118.54      9     0.00      0     0.00      0
+0.00000e+00  6.18123e+02  2.28298e+02  1.12802e+02  9.21321e+01  6.71185e+01
+4.17206e+01  1.99587e+01  5.27757e+00
+

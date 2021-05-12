@@ -177,6 +177,8 @@ if __name__ == "__main__":
     dx = 0.1
     _, vs, _ = expand_bbp_velocity_model(mod, nx, nz, dx)
 
+    
+
     ax = plot_2d_image(vs, nx=nx, nz=nz, dx=dx,
                        clabel = r'$c_s$ (km/s) ', xlabel="Distance (km)", ylabel="Distance (km)",
                        surface_plot=False, contour_plot=False)

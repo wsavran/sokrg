@@ -2,6 +2,7 @@
 .RHistory
 *.pyc
 *.pdf
+*.swp
 source_models/
 presentation/
 

@@ -16,7 +16,7 @@ from utils import plot_2d_image
 
 def main(kwargs=None):
 
-    print('Generating fault model using SO-KRG v1.0')
+    print('Generating rupture model using SO-KRG v1.0')
     print('========================================\n')
 
     params = kwargs or {}
@@ -24,6 +24,7 @@ def main(kwargs=None):
     tapering = params['tapering']
     writing = params['writing']
     layered = params['layered']
+    generate_fields = params['generate_fields']
     resample = False
     write_template = False
     force_slip_to_zero = True
@@ -38,26 +39,48 @@ def main(kwargs=None):
     print('debug: ' + str(debug))
     print()
 
-    print('Generating random fields...')
-    cmnd = [
-        "RScript",
-        "--vanilla",
-        "generic_sim_tottori.R",
-        str(params['output_path']),
-        str(params['seed']),
-        str(params['nsim']),
-        str(params['dx']),
-        str(params['fault_length']),
-        str(params['fault_width'])
-    ]
-    return_code = subprocess.run(" ".join(cmnd), capture_output=True, shell=True)
-    print(" ".join(cmnd))
-    print(return_code.stdout.decode('utf-8'))
+    if generate_fields:
+      print('Generating random fields...')
+      cmnd = [
+          "RScript",
+          "--vanilla",
+          "generic_sim_tottori.R",
+          str(params['output_path']),
+          str(params['seed']),
+          str(params['nsim']),
+          str(params['dx']),
+          str(params['fault_length']),
+          str(params['fault_width'])
+      ]
+      return_code = subprocess.run(" ".join(cmnd), capture_output=True, shell=True)
+      print(" ".join(cmnd))
+      print(return_code.stdout.decode('utf-8'))
 
-    if return_code.returncode != 0:
-      print('\tError generating random fields. Exiting program.')
-      print(return_code.stderr.decode('utf-8'))
-      exit(1)
+      if return_code.returncode != 0:
+        print('\tError generating random fields. Exiting program.')
+        print(return_code.stderr.decode('utf-8'))
+        exit(1)
+    else:
+      print('Skipping random field generation. Using pre-existing simulations.')
+
+    # generate strike, dip, and rake 
+    nhat1 = np.fromfile("nhat1", "f").reshape(801, 2601)
+    nhat2 = np.absolute(np.fromfile("nhat2", "f").reshape(801, 2601))
+    nhat3 = np.fromfile("nhat3", "f").reshape(801, 2601) # make vector point "up"
+    
+    # note: starting at x=1000 to reduce model size for small model
+    # should implement this calculation outside
+    nhat1 = nhat1[::4]
+    nhat2 = nhat2[::4]
+    nhat3 = nhat3[::4]
+
+    #fienen "the three-point problem"
+    # project onto horizontal plane, calculate angle between
+    print('Computing strike dip and rake...')
+    dip = get_dip(nhat1, nhat2, nhat3)
+    strike = get_strike(nhat1, nhat3)
+    # rake = np.ones(strike.shape)*180.0 # constant rake
+    rake = strike - 90 # strike is 270 and rake is 180
 
     # using array 1 index
     for src_idx in range(1, params['nsim']+1):
@@ -138,7 +161,7 @@ def main(kwargs=None):
             slip = boundary_taper(slip, 
                                     taper_width=taper_width, 
                                     free_surface=True, 
-                                    values=np.array(((0.60, 0.05), (0.05,0.05))) )
+                                    values=np.array(((0.60, 0.05), (0.05, 0.05))) )
 
             avg_slip_post = slip.mean()
             slip_taper_ratio = avg_slip_pre / avg_slip_post
@@ -152,8 +175,7 @@ def main(kwargs=None):
             padded = np.pad( baseline, 
                              ((3*taper_width,taper_width), (taper_width,taper_width)), 
                              'linear_ramp', 
-                             end_values=np.array(((0.30, 0.05), (0.05,0.05))) )
-
+                             end_values=np.array(((0.30, 0.05), (0.05, 0.05))) )
             psv = padded * psv 
             vrup = vrup * vs
             
@@ -175,46 +197,48 @@ def main(kwargs=None):
         print()
         trup = compute_trup(vrup, params)
 
-    # compute new psv given tinti kinematic parameters
+        # replace large nan values with large number; ie., they didn't rupture
+        inds = np.where(np.isnan(trup))
+        trup[inds] = 999.
 
-    # 1) cap max(slip/psv) = 2
+        # compute new psv given tinti kinematic parameters
+        # 1) cap max(slip/psv) = 2
         psv_eff=psv.copy()
         inds=np.where(slip/psv_eff > 2)
         psv_eff[inds]=slip[inds] / 2
 
-    # 2) cap min(psv) = 0.1
+        # 2) cap min(psv) = 0.1
         inds=np.where( psv_eff < 0.1 )
         psv_eff[inds]=0.1
 
-    # estimate dcp based on mean of psv_eff and regression analysis, where vpeak/dcp = 2.46*fs_max
+        # estimate dcp based on mean of psv_eff and regression analysis, where vpeak/dcp = 2.46*fs_max
         fs_max = params['fs_max']
         ratio_vpeak_dcp = fs_max*2.46
         dc_est = 1.0/ratio_vpeak_dcp * psv_eff.mean()
 
-    # compute ts on fault using dc_est
+        # compute ts on fault using dc_est
         ratio_dcp_est_psv_eff = dc_est / psv_eff
         ts = 1.55 * ratio_dcp_est_psv_eff
 
         # this was chosen as a reasonable upper bound, but this needs to be defined more explicitly
         # truptot=18.5
         # savran and olsen, 2020 defines this as the average trup on the fault boundary
-        truptot = np.max([
-          np.percentile(trup[0,:], 99),
-          np.percentile(trup[-1,:], 99),
-          np.percentile(trup[:,0], 99),
-          np.percentile(trup[:,-1], 99)
-        ])
+        per = 97.5
+        truptot = np.percentile(
+          np.hstack([trup[0,:], trup[-1,:], trup[:,0], trup[:,-1]]),
+          per
+        )
         treff=truptot-trup
 
-    # compute tr
+        # compute tr
         tr = 3.62 * slip + 0.07 * treff;
         tr[tr < 0] = 0
 
-    # compute test tr using eq.11 from tinti et al, 2005
+        # compute test tr using eq.11 from tinti et al, 2005
         tr_eq11 = (1.3*ts)/(dc_est/slip)**2
         tr_eq7 = slip**2 / psv_eff**2 / (1.3*ts)
 
-    # compute psv of tinti functions
+        # compute psv of tinti functions
         inds=np.where(tr > 0)
         psv_tinti=np.zeros(psv_eff.shape)
         psv_tinti[inds] = 1.04*slip[inds] / ( ((1.3*ts[inds])**0.54) * (tr[inds]**0.47) )
@@ -225,7 +249,7 @@ def main(kwargs=None):
         print(f'vrup: min, max ({vrup.min():.2f}, {vrup.max():.2f})')
         print(f'trup: min, max ({trup.min():.2f}, {trup.max():.2f})')
         print(f'ts: min, max, mean ({ts.min():.2f}, {ts.max():.2f}, {ts.mean():.2f})')
-        print(f'tr: min, max, mean ({tr.min():.2f}, {tr.max():.2f}, {tr.mean():.2f}')
+        print(f'tr: min, max, mean ({tr.min():.2f}, {tr.max():.2f}, {tr.mean():.2f})')
         print(f'psv_tinti: min, max, mean ({psv_tinti.min():.2f}, {psv_tinti.max():.2f}, {psv_tinti.mean():.2f})')
         print(f'tr_eq11_eq11: min, max, mean ({tr_eq11.min():.2f}, {tr_eq11.max():.2f}, {tr_eq11.mean():.2f})')
         print(f'tr_eq7_eq11: min, max, mean ({tr_eq7.min():.2f}, {tr_eq7.max():.2f}, {tr_eq7.mean():.2f})')
@@ -276,26 +300,8 @@ def main(kwargs=None):
 
             plot_2d_image( psv_tinti, out_dir + "/psv_tinti-" + output_name + ".pdf", nx = params['nx'], nz = params['nz'], dx = params['dx']*1e-3,
                                                   clabel = r'$V^{peak}$ (m/s)', xlabel = "Distance (km)", ylabel = "Distance (km)",
-                                                  surface_plot = False, contour_plot = False, cmap='jet', clim=(0,psv.max()), show_plots=params['show_plots'])
+                                                  surface_plot = False, contour_plot = False, cmap='jet', clim=(0,psv_tinti.max()), show_plots=params['show_plots'])
             plt.close('all')
-        # generate strike, dip, and rake 
-        nhat1 = np.fromfile("nhat1", "f").reshape(801, 2601)
-        nhat2 = np.absolute(np.fromfile("nhat2", "f").reshape(801, 2601))
-        nhat3 = np.fromfile("nhat3", "f").reshape(801, 2601) # make vector point "up"
-        
-        # NOTE: starting at x=1000 to reduce model size for small model
-        # should implement this calculation outside
-        nhat1 = nhat1[::4]
-        nhat2 = nhat2[::4]
-        nhat3 = nhat3[::4]
-
-        #fienen "the three-point problem"
-        # project onto horizontal plane, calculate angle between
-        print('Computing strike dip and rake...')
-        dip = get_dip(nhat1, nhat2, nhat3)
-        strike = get_strike(nhat1, nhat3)
-        # rake = np.ones(strike.shape)*180.0 # constant rake
-        rake = strike - 90 # strike is 270 and rake is 180
 
         # write to file for input
         if writing:
@@ -348,6 +354,7 @@ def main(kwargs=None):
         
 
 if __name__ == "__main__":
+
     params = {
       'fault_length': 27000,
       'fault_width': 14200,
@@ -360,13 +367,14 @@ if __name__ == "__main__":
       'fs_max': 12.5,
       'output_path': '/Users/wsavran/Research/sokrg_bbp/source_models',
       'seed': 123456,
-      'nsim': 1,
+      'nsim': 64,
       'velocity_model_path': './central_japan_bbp1d.txt',
       'plot_on': True,
-      'show_plots': True,
+      'show_plots': False,
       'tapering': True,
       'writing': True,
-      'layered': True
+      'layered': True,
+      'generate_fields': False
     }
 
     t0 = time.time()
@@ -374,3 +382,23 @@ if __name__ == "__main__":
     t1 = time.time()
     print()
     print(f"Generated {params['nsim']} source models in {t1-t0} seconds.")
+
+    # # plot histograms of border rupture times
+    # borders = np.hstack([trup[0,:],trup[-1,:], trup[:,0], trup[:,-1]])
+    # p90 = np.percentile(borders, 90)
+    # p95 = np.percentile(borders, 95)
+    # p97p5 = np.percentile(borders, 97.5)
+    # p99 = np.percentile(borders, 99)
+    # plt.figure()
+    # plt.hist(borders, bins=np.arange(0, 12, 0.1))
+    # plt.title(f'Source {src_idx}')
+    # plt.xlabel('t$_{rup}$ [s]')
+    # plt.ylabel('Count')
+    # plt.axvline(p90, color='k', label='[p90, p95, p97.5, p99]')
+    # plt.axvline(x=p95, color='k')
+    # plt.axvline(x=p97p5, color='k')
+    # plt.axvline(x=p99, color='k')
+    # plt.legend(loc='upper left')
+    # plt.show()
+
+
