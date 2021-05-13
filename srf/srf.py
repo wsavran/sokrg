@@ -214,6 +214,7 @@ class Writer:
                 else:
                     self.file.write('\n')
 
+
 class Reader: 
     """          
     Parses SRF File header and data block.  self.data contains list of FaultSegment classes with header

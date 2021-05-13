@@ -13,6 +13,7 @@ import pandas as pd
 # local imports
 from krg_utils import *
 from utils import plot_2d_image
+from tinti import tinti
 
 def main(kwargs=None):
 
@@ -108,6 +109,7 @@ def main(kwargs=None):
       # extract data
       slip = np.fromfile(src_dir + f'slip_sim{src_idx}.bin').reshape(params['inz'], params['inx'])
 
+      # flag used when choosing magnitudes
       if force_slip_to_zero:
         slip = slip - slip.mean()
 
@@ -315,7 +317,7 @@ def main(kwargs=None):
             vrup.astype(dtype).tofile(os.path.join(out_dir, output_name + '_vrup.bin'))
             trup.astype(dtype).tofile(os.path.join(out_dir, output_name + '_trup.bin'))
             strike.astype(dtype).tofile(os.path.join(out_dir, output_name + '_strike.bin'))
-            dip.astype(dtype).tofile(os.path.join(out_dir, output_name + '_dip.bin'))
+            dip.astype(dtype).tofile(os.path.joinkout_dir, output_name + '_dip.bin'))
             rake.astype(dtype).tofile(os.path.join(out_dir, output_name + '_rake.bin'))
             moment.astype(dtype).tofile(os.path.join(out_dir, output_name + '_moment.bin'))
             ts.astype(dtype).tofile(os.path.join(out_dir, output_name + '_ts.bin'))
@@ -351,7 +353,62 @@ def main(kwargs=None):
               print('copying fault_coords.bin into out_dir')
               shutil.copy2('./fault_coords.bin', out_dir)
 
-        
+        # write SRF files for source model
+        if generate_srf:
+
+            srf = srf.FiniteFaultSource()
+            seg = srf.FaultSegment()
+            # segment information
+            # fault center lon and lat
+            seg.elon = params['lon_top_center']
+            seg.elat = params['lat_top_center']
+            # num points along strike and dip
+            seg.nstk = params['inx']
+            seg.ndip = params['inz']
+            # fault length
+            seg.len = params['fault_length'] / 1e3
+            # fault width
+            seg.wid = params['fault_width'] / 1e3
+            # fault strike
+            seg.stk = np.mean(strike)
+            # fault dip
+            seg.dip = np.mean(dip)
+            # depth to top of fault (km)
+            seg.dtop = params['fault_top'] / 1e3
+            # along strike hypo center (km)
+            seg.shyp = params['ihypo'][1] * params['dx'] / 1e3
+            # along dip hypo center (km)
+            seg.dhyp = params['ihypo'][0] * params['dx'] / 1e3
+            # add to finite source
+            srf.segment_headers.append(seg)
+
+
+            # prepare subfaults
+            # prepare subfault lon, lat
+            for idz in params['inz']:
+                for idx in params['inx']:
+                    p = PointSource()
+                    # subfault depth (km)
+                    p.dep = idz * params['dx'] / 1e3
+                    # strike and dip (planar)
+                    p.stk = strike[idz, idx]
+                    p.dip = dip[idz, idx]
+                    # subfault area (cm^2)
+                    p.area = params['dx']**2 / 1e3 / 1e3
+                    # t_init of source time function
+                    p.tinit = trup[idz,idx]
+                    # extract material parameters
+                    # vs (cm/s)
+                    p.vs = vs[idz, idx]
+                    # rho (g/cm^3)
+                    p.rho = rho[idz, idx]
+                    # decompose using strike, dip, and rake
+                    # slip1, nt1
+                    # slip2, nt2
+                    # slip3, nt3
+
+                    # prepare source-time function
+
 
 if __name__ == "__main__":
 
@@ -361,7 +418,7 @@ if __name__ == "__main__":
       'dx' : 100,
       'target_moment': 8.62e+18,
       'ihypo' : (120, 135),
-      'fault_top' : 0,
+      'fault_top' : 100,
       'taper_width_slip': 30,
       'taper_width_psv': 10,
       'fs_max': 12.5,
@@ -375,6 +432,11 @@ if __name__ == "__main__":
       'writing': True,
       'layered': True,
       'generate_fields': False
+      'generate_srf': True
+      'lat_top_center': 35.269
+      'lon_top_center': 133.357
+      'hypo_along_stk': 0.00
+      'hypo_along_dip': 14.00
     }
 
     t0 = time.time()

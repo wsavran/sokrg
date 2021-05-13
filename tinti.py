@@ -88,7 +88,6 @@ def tinti(t, Ts, Tr, t0):
     return k*stf
 
 
-
 if __name__ == "__main__":
     # testing goes here.
     from pylab import *
