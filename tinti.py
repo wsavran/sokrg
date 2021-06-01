@@ -3,7 +3,8 @@ import numpy as np
 def i1(t,Tr):
     p1 = np.pi*(4*t - Tr)*Tr + 8*t**1.5*np.sqrt(-t + Tr)
     p2 = 4*Tr*np.sqrt(t*(-t + Tr)) 
-    p3 = - 2*(4*t - Tr)*Tr*np.arctan((-2*t + Tr)/(2.*np.sqrt(t*(-t + Tr))))
+    with np.errstate(divide='ignore'):
+        p3 = - 2*(4*t - Tr)*Tr*np.arctan((-2*t + Tr)/(2.*np.sqrt(t*(-t + Tr))))
     return (p1+p2+p3)/16.0
 
 def i2(t,Tr,Ts):
@@ -81,7 +82,7 @@ def tinti(t, Ts, Tr, t0):
         stf[(t >= Ts+Tr) & (t<2*Ts+Tr)] = i5(t[(t >= Ts+Tr) & (t<2*Ts+Tr)], Tr, Ts)
 
     else:
-        print "Invalid parameters assigned. (tr=%f, ts=%f)" % (Tr, Ts)
+        print(f"Invalid parameters assigned. (tr={Tr:.3f}, ts={Ts:.3f})")
     
     d = int(np.ceil((t0)/dt))
     stf = np.roll(stf, d)

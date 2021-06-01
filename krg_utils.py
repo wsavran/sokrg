@@ -108,7 +108,8 @@ def get_moment(slip, vs, rho, params):
     return moment
 
 
-def get_strike(nhat1, nhat3):
+def get_strike(nhat1, nhat3, mean_strike=270):
+
     nz,nx = nhat1.shape
     strike = np.ones([nz,nx])
     for i in range(nz):
@@ -128,7 +129,9 @@ def get_strike(nhat1, nhat3):
             elif nhat1[i,j] > 0 and nhat3[i,j] < 0:
                 # in 4th quad
                 strike[i,j] = theta - 90
-    return strike
+    # rotate to different strike
+    stk = strike - 270 + mean_strike
+    return stk
 
 def source_time_function():
     pass

@@ -14,6 +14,12 @@ import pandas as pd
 from krg_utils import *
 from utils import plot_2d_image
 from tinti import tinti
+from srf import FaultSegment, PointSource, FiniteFaultSource, write
+from flat_earth import convert_local_idx_to_geo
+
+meters_per_kilometer = 1e3
+centimeters_per_meter = 1e2
+kgm_to_gcm = 1e-3
 
 def main(kwargs=None):
 
@@ -79,7 +85,7 @@ def main(kwargs=None):
     # project onto horizontal plane, calculate angle between
     print('Computing strike dip and rake...')
     dip = get_dip(nhat1, nhat2, nhat3)
-    strike = get_strike(nhat1, nhat3)
+    strike = get_strike(nhat1, nhat3, mean_strike=params['strike'])
     # rake = np.ones(strike.shape)*180.0 # constant rake
     rake = strike - 90 # strike is 270 and rake is 180
 
@@ -169,7 +175,6 @@ def main(kwargs=None):
             slip_taper_ratio = avg_slip_pre / avg_slip_post
             slip = slip * slip_taper_ratio
 
-
             # taper to 30% of mean along-strike psv at z = taper_width * dx 
             taper_width = params['taper_width_psv']
             ny,nx=psv.shape
@@ -210,7 +215,7 @@ def main(kwargs=None):
         psv_eff[inds]=slip[inds] / 2
 
         # 2) cap min(psv) = 0.1
-        inds=np.where( psv_eff < 0.1 )
+        inds=np.where(psv_eff < 0.1)
         psv_eff[inds]=0.1
 
         # estimate dcp based on mean of psv_eff and regression analysis, where vpeak/dcp = 2.46*fs_max
@@ -230,16 +235,20 @@ def main(kwargs=None):
           np.hstack([trup[0,:], trup[-1,:], trup[:,0], trup[:,-1]]),
           per
         )
-        treff=truptot-trup
 
+        treff=truptot-trup
         # compute tr
         tr = 3.62 * slip + 0.07 * treff;
         tr[tr < 0] = 0
 
+        # prevent bad parameters
+        inds = np.where(tr < ts)
+        tr[inds] = 1.5 * ts[inds]
+
         # compute test tr using eq.11 from tinti et al, 2005
         tr_eq11 = (1.3*ts)/(dc_est/slip)**2
         tr_eq7 = slip**2 / psv_eff**2 / (1.3*ts)
-
+    
         # compute psv of tinti functions
         inds=np.where(tr > 0)
         psv_tinti=np.zeros(psv_eff.shape)
@@ -256,6 +265,7 @@ def main(kwargs=None):
         print(f'tr_eq11_eq11: min, max, mean ({tr_eq11.min():.2f}, {tr_eq11.max():.2f}, {tr_eq11.mean():.2f})')
         print(f'tr_eq7_eq11: min, max, mean ({tr_eq7.min():.2f}, {tr_eq7.max():.2f}, {tr_eq7.mean():.2f})')
         print(f'truptot: {truptot}')
+        print(f'avg strike: {strike.mean():.2f}')
         print()
 
         if plot_on:
@@ -317,7 +327,7 @@ def main(kwargs=None):
             vrup.astype(dtype).tofile(os.path.join(out_dir, output_name + '_vrup.bin'))
             trup.astype(dtype).tofile(os.path.join(out_dir, output_name + '_trup.bin'))
             strike.astype(dtype).tofile(os.path.join(out_dir, output_name + '_strike.bin'))
-            dip.astype(dtype).tofile(os.path.joinkout_dir, output_name + '_dip.bin'))
+            dip.astype(dtype).tofile(os.path.join(out_dir, output_name + '_dip.bin'))
             rake.astype(dtype).tofile(os.path.join(out_dir, output_name + '_rake.bin'))
             moment.astype(dtype).tofile(os.path.join(out_dir, output_name + '_moment.bin'))
             ts.astype(dtype).tofile(os.path.join(out_dir, output_name + '_ts.bin'))
@@ -354,70 +364,96 @@ def main(kwargs=None):
               shutil.copy2('./fault_coords.bin', out_dir)
 
         # write SRF files for source model
-        if generate_srf:
-
-            srf = srf.FiniteFaultSource()
-            seg = srf.FaultSegment()
+        if params['generate_srf']:
+            srf = FiniteFaultSource()
+            srf.version = 2.0
+            seg = FaultSegment()
             # segment information
             # fault center lon and lat
             seg.elon = params['lon_top_center']
             seg.elat = params['lat_top_center']
             # num points along strike and dip
-            seg.nstk = params['inx']
-            seg.ndip = params['inz']
-            # fault length
-            seg.len = params['fault_length'] / 1e3
-            # fault width
-            seg.wid = params['fault_width'] / 1e3
+            seg.nstk = params['nx']
+            seg.ndip = params['nz']
+            # fault length (km)
+            seg.len = params['fault_length'] / meters_per_kilometer
+            # fault width (km)
+            seg.wid = params['fault_width'] / meters_per_kilometer
             # fault strike
             seg.stk = np.mean(strike)
             # fault dip
             seg.dip = np.mean(dip)
             # depth to top of fault (km)
-            seg.dtop = params['fault_top'] / 1e3
+            seg.dtop = params['fault_top'] / meters_per_kilometer
             # along strike hypo center (km)
-            seg.shyp = params['ihypo'][1] * params['dx'] / 1e3
+            seg.shyp = params['ihypo'][1] * params['dx'] / meters_per_kilometer
             # along dip hypo center (km)
-            seg.dhyp = params['ihypo'][0] * params['dx'] / 1e3
+            seg.dhyp = params['ihypo'][0] * params['dx'] / meters_per_kilometer
             # add to finite source
             srf.segment_headers.append(seg)
-
-
             # prepare subfaults
-            # prepare subfault lon, lat
-            for idz in params['inz']:
-                for idx in params['inx']:
+            lat0 = params['lat_top_center'] 
+            lon0 = params['lon_top_center']
+            stk = np.deg2rad(params['strike'])
+            length = params['fault_length'] / meters_per_kilometer
+            dx = params['dx']
+            t = np.arange(0.0, 25.0, 0.025)
+            srcs = []
+            for idz in range(params['nz']):
+                for idx in range(params['nx']):
                     p = PointSource()
+                    # uses flat-earth approximation centered on fault
+                    p.lat, p.lon = convert_local_idx_to_geo(idx, lat0, lon0, params['fault_length'], params['dx'], stk)
                     # subfault depth (km)
-                    p.dep = idz * params['dx'] / 1e3
+                    p.dep = (params['fault_top'] + idz * dx) / meters_per_kilometer
                     # strike and dip (planar)
                     p.stk = strike[idz, idx]
                     p.dip = dip[idz, idx]
                     # subfault area (cm^2)
-                    p.area = params['dx']**2 / 1e3 / 1e3
+                    p.area = params['dx'] * params['dx'] * centimeters_per_meter * centimeters_per_meter 
                     # t_init of source time function
                     p.tinit = trup[idz,idx]
                     # extract material parameters
                     # vs (cm/s)
-                    p.vs = vs[idz, idx]
+                    p.vs = vs[idz, idx] * centimeters_per_meter
+                    p.dt = params['dt']
                     # rho (g/cm^3)
-                    p.rho = rho[idz, idx]
+                    p.den = rho[idz, idx] * kgm_to_gcm
+                    p.rake = params['rake']
                     # decompose using strike, dip, and rake
-                    # slip1, nt1
-                    # slip2, nt2
-                    # slip3, nt3
-
+                    stf = centimeters_per_meter * slip[idz,idx] * tinti(t, ts[idz,idx], tr[idz,idx], 0.0) 
+                    if np.any(np.isnan(stf)):
+                        print('nan found in stf with params {ts[idz,idx]:.2f}, {tr[idz,idx]:.2f}')
                     # prepare source-time function
+                    stf_trimmed = np.trim_zeros(stf, trim='b')
+                    new_length = stf_trimmed.shape[0]
+                    # slip1, nt1
+                    p.sr1 = stf_trimmed
+                    p.slip1 = slip[idz,idx] * centimeters_per_meter
+                    p.nt1 = new_length
+                    # slip2, nt2
+                    p.slip2 = 0 * centimeters_per_meter
+                    p.nt2 = 0
+                    # slip3, nt3
+                    p.slip3 = 0 * centimeters_per_meter
+                    p.nt3 = 0
+                    srcs.append(p)
+            srf.point_sources.append(srcs)
+            # write out to file
+            print(f'Writing source {src_idx}')
+            write(f'./srf/tottori-sokrg_v3-src{src_idx}.srf', srf)
+
 
 
 if __name__ == "__main__":
-
+    
+    # values with units are provided using kg/m/s
     params = {
       'fault_length': 27000,
       'fault_width': 14200,
       'dx' : 100,
       'target_moment': 8.62e+18,
-      'ihypo' : (120, 135),
+      'ihypo' : (121, 135),
       'fault_top' : 100,
       'taper_width_slip': 30,
       'taper_width_psv': 10,
@@ -431,12 +467,16 @@ if __name__ == "__main__":
       'tapering': True,
       'writing': True,
       'layered': True,
-      'generate_fields': False
-      'generate_srf': True
-      'lat_top_center': 35.269
-      'lon_top_center': 133.357
-      'hypo_along_stk': 0.00
-      'hypo_along_dip': 14.00
+      'generate_fields': False,
+      'generate_srf': True,
+      'lat_top_center': 35.269,
+      'lon_top_center': 133.357,
+      'hypo_along_stk': 0.00,
+      'hypo_along_dip': 14.00,
+      'strike': 150, 
+      'rake': 180,
+      'dip': 90,
+      'dt': 0.025
     }
 
     t0 = time.time()
