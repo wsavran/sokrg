@@ -441,7 +441,7 @@ def main(kwargs=None):
             srf.point_sources.append(srcs)
             # write out to file
             print(f'Writing source {src_idx}')
-            write(f'./srf/tottori-sokrg_v3-src{src_idx}.srf', srf)
+            write(f'./srf/tottori-sokrg_v4-src{src_idx-1:04d}.srf', srf)
 
 
 
@@ -450,7 +450,7 @@ if __name__ == "__main__":
     # values with units are provided using kg/m/s
     params = {
       'fault_length': 27000,
-      'fault_width': 14200,
+      'fault_width': 21000,
       'dx' : 100,
       'target_moment': 8.62e+18,
       'ihypo' : (121, 135),
@@ -467,7 +467,7 @@ if __name__ == "__main__":
       'tapering': True,
       'writing': True,
       'layered': True,
-      'generate_fields': False,
+      'generate_fields': True,
       'generate_srf': True,
       'lat_top_center': 35.269,
       'lon_top_center': 133.357,
